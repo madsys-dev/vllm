@@ -30,7 +30,7 @@ gauge_iteration_latency = Gauge(
 # end-metrics-definitions
 
 # benchmarking metrics
-counter_iterations = Counter("vllm_bench:iters", "Total number of iterations.")
+gauge_normalized_iterations = Gauge("vllm_bench:iters", "Total number of (normalized) iterations.")
 counter_token_generated = Counter("vllm_bench:generated_tokens", "Total number of generated tokens.")
 
 
@@ -60,6 +60,8 @@ def record_metrics(
     gauge_cpu_cache_usage.set(labels, cpu_cache_usage)
     gauge_iteration_latency.set(labels, iteration_latency)
 
-def record_metrics_bench(tokens_generated: int):
-    counter_iterations.inc(labels)
+def record_metrics_bench(tokens_generated: int, requests_running: int):
+    if tokens_generated == 0:
+        return
+    gauge_normalized_iterations.add(labels, tokens_generated / max(tokens_generated, requests_running))
     counter_token_generated.add(labels, tokens_generated)

@@ -155,9 +155,9 @@ class Metrics:
                     chunks.append(chunk)
                 output = b"".join(chunks).decode()
         import re
-        iters = re.search(r'^vllm_bench:iters ([0-9]+)', output, flags=re.MULTILINE).group(1)
-        generated_tokens = re.search(r'^vllm_bench:generated_tokens ([0-9]+)', output, flags=re.MULTILINE).group(1)
-        return Metrics(int(iters), int(generated_tokens), time.perf_counter())
+        iters = re.search(r'^vllm_bench:iters ([0-9.]+)', output, flags=re.MULTILINE).group(1)
+        generated_tokens = re.search(r'^vllm_bench:generated_tokens ([0-9.]+)', output, flags=re.MULTILINE).group(1)
+        return Metrics(float(iters), float(generated_tokens), time.perf_counter())
 
     def __sub__(self, other: 'Metrics') -> 'Metrics':
         return Metrics(self.iters - other.iters, self.generated_tokens - other.generated_tokens, 

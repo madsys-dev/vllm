@@ -606,7 +606,9 @@ class LLMEngine:
                                       for t, n in self.num_generation_tokens
                                       if now - t < _LOGGING_INTERVAL_SEC]
         
-        record_metrics_bench(0 if prompt_run else num_batched_tokens)
+        if not prompt_run:
+            record_metrics_bench(num_batched_tokens, len(self.scheduler.running) + len(self.scheduler.waiting) \
+                                 + len(self.scheduler.swapped))
 
         should_log = now - self.last_logging_time >= _LOGGING_INTERVAL_SEC
         if not should_log:

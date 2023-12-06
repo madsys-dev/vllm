@@ -11,11 +11,16 @@ from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.sampling_params import SamplingParams
 from vllm.utils import random_uuid
 
+from aioprometheus import MetricsMiddleware
+from aioprometheus.asgi.starlette import metrics
+
 TIMEOUT_KEEP_ALIVE = 5  # seconds.
 TIMEOUT_TO_PREVENT_DEADLOCK = 1  # seconds.
 app = FastAPI()
 engine = None
 
+app.add_middleware(MetricsMiddleware)  # Trace HTTP server metrics
+app.add_route("/metrics", metrics)  # Exposes HTTP metrics
 
 @app.get("/health")
 async def health() -> Response:
@@ -35,10 +40,11 @@ async def generate(request: Request) -> Response:
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
+    prompt_token_ids = request_dict.pop("prompt_token_ids")
     sampling_params = SamplingParams(**request_dict)
     request_id = random_uuid()
 
-    results_generator = engine.generate(prompt, sampling_params, request_id)
+    results_generator = engine.generate(prompt, sampling_params, request_id, prompt_token_ids)
 
     # Streaming case
     async def stream_results() -> AsyncGenerator[bytes, None]:

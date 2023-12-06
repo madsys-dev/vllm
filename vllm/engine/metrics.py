@@ -1,4 +1,4 @@
-from aioprometheus import Gauge
+from aioprometheus import Gauge, Counter
 
 # The begin-* and end* here are used by the documentation generator
 # to extract the metrics definitions.
@@ -24,7 +24,15 @@ gauge_gpu_cache_usage = Gauge(
 gauge_cpu_cache_usage = Gauge(
     "vllm:cpu_cache_usage_perc",
     "CPU KV-cache usage. 1 means 100 percent usage.")
+gauge_iteration_latency = Gauge(
+    "vllm:iteration_latency",
+    "Average iteration latency.")
 # end-metrics-definitions
+
+# benchmarking metrics
+counter_iterations = Counter("vllm_bench:iters", "Total number of iterations.")
+counter_token_generated = Counter("vllm_bench:generated_tokens", "Total number of generated tokens.")
+
 
 labels = {}
 
@@ -41,6 +49,7 @@ def record_metrics(
     scheduler_waiting: int,
     gpu_cache_usage: float,
     cpu_cache_usage: float,
+    iteration_latency: float,
 ):
     gauge_avg_prompt_throughput.set(labels, avg_prompt_throughput)
     gauge_avg_generation_throughput.set(labels, avg_generation_throughput)
@@ -49,3 +58,8 @@ def record_metrics(
     gauge_scheduler_waiting.set(labels, scheduler_waiting)
     gauge_gpu_cache_usage.set(labels, gpu_cache_usage)
     gauge_cpu_cache_usage.set(labels, cpu_cache_usage)
+    gauge_iteration_latency.set(labels, iteration_latency)
+
+def record_metrics_bench(tokens_generated: int):
+    counter_iterations.inc(labels)
+    counter_token_generated.add(labels, tokens_generated)

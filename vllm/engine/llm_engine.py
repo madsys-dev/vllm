@@ -7,7 +7,7 @@ from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
                          SchedulerConfig)
 from vllm.core.scheduler import Scheduler, SchedulerOutputs
 from vllm.engine.arg_utils import EngineArgs
-from vllm.engine.metrics import record_metrics
+from vllm.engine.metrics import record_metrics, record_metrics_bench
 from vllm.engine.ray_utils import RayWorkerVllm, initialize_cluster, ray
 from vllm.logger import init_logger
 from vllm.outputs import RequestOutput
@@ -116,6 +116,7 @@ class LLMEngine:
 
         # Logging.
         self.last_logging_time = 0.0
+        self.logging_iters = 0.0
         # List of (timestamp, num_tokens)
         self.num_prompt_tokens: List[Tuple[float, int]] = []
         # List of (timestamp, num_tokens)
@@ -413,7 +414,7 @@ class LLMEngine:
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:
-            self._decode_sequence(seq, seq_group.sampling_params)
+            #self._decode_sequence(seq, seq_group.sampling_params)
             self._check_stop(seq, seq_group.sampling_params)
 
         # Non-beam search case
@@ -596,9 +597,7 @@ class LLMEngine:
         else:
             self.num_generation_tokens.append((now, num_batched_tokens))
 
-        should_log = now - self.last_logging_time >= _LOGGING_INTERVAL_SEC
-        if not should_log:
-            return
+        self.logging_iters += 1
 
         # Discard the old stats.
         self.num_prompt_tokens = [(t, n) for t, n in self.num_prompt_tokens
@@ -606,6 +605,12 @@ class LLMEngine:
         self.num_generation_tokens = [(t, n)
                                       for t, n in self.num_generation_tokens
                                       if now - t < _LOGGING_INTERVAL_SEC]
+        
+        record_metrics_bench(0 if prompt_run else num_batched_tokens)
+
+        should_log = now - self.last_logging_time >= _LOGGING_INTERVAL_SEC
+        if not should_log:
+            return
 
         if len(self.num_prompt_tokens) > 1:
             total_num_tokens = sum(n for _, n in self.num_prompt_tokens[:-1])
@@ -636,6 +641,7 @@ class LLMEngine:
         else:
             cpu_cache_usage = 0.0
 
+        iteration_latency=(now - self.last_logging_time) / self.logging_iters
         record_metrics(
             avg_prompt_throughput=avg_prompt_throughput,
             avg_generation_throughput=avg_generation_throughput,
@@ -644,6 +650,7 @@ class LLMEngine:
             scheduler_waiting=len(self.scheduler.waiting),
             gpu_cache_usage=gpu_cache_usage,
             cpu_cache_usage=cpu_cache_usage,
+            iteration_latency=iteration_latency
         )
 
         logger.info("Avg prompt throughput: "
@@ -654,8 +661,10 @@ class LLMEngine:
                     f"Swapped: {len(self.scheduler.swapped)} reqs, "
                     f"Pending: {len(self.scheduler.waiting)} reqs, "
                     f"GPU KV cache usage: {gpu_cache_usage * 100:.1f}%, "
-                    f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%")
+                    f"CPU KV cache usage: {cpu_cache_usage * 100:.1f}%, "
+                    f"Iteration latency: {iteration_latency:.6f} sec")
         self.last_logging_time = now
+        self.logging_iters = 0
 
     def _decode_sequence(self, seq: Sequence, prms: SamplingParams) -> None:
         """Decodes the new token for a sequence."""
@@ -680,16 +689,16 @@ class LLMEngine:
     def _check_stop(self, seq: Sequence,
                     sampling_params: SamplingParams) -> None:
         """Stop the finished sequences."""
-        for stop_str in sampling_params.stop:
-            if seq.output_text.endswith(stop_str):
-                # Truncate the output text so that the stop string is
-                # not included in the output.
-                seq.output_text = seq.output_text[:-len(stop_str)]
-                seq.status = SequenceStatus.FINISHED_STOPPED
-                return
-        if seq.get_last_token_id() in sampling_params.stop_token_ids:
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            return
+        # for stop_str in sampling_params.stop:
+        #     if seq.output_text.endswith(stop_str):
+        #         # Truncate the output text so that the stop string is
+        #         # not included in the output.
+        #         seq.output_text = seq.output_text[:-len(stop_str)]
+        #         seq.status = SequenceStatus.FINISHED_STOPPED
+        #         return
+        # if seq.get_last_token_id() in sampling_params.stop_token_ids:
+        #     seq.status = SequenceStatus.FINISHED_STOPPED
+        #     return
 
         # Check if the sequence has reached max_model_len.
         if seq.get_len() > self.scheduler_config.max_model_len:
@@ -701,11 +710,11 @@ class LLMEngine:
             seq.status = SequenceStatus.FINISHED_LENGTH_CAPPED
             return
 
-        # Check if the sequence has generated the EOS token.
-        if ((not sampling_params.ignore_eos)
-                and seq.get_last_token_id() == self.tokenizer.eos_token_id):
-            seq.status = SequenceStatus.FINISHED_STOPPED
-            return
+        # # Check if the sequence has generated the EOS token.
+        # if ((not sampling_params.ignore_eos)
+        #         and seq.get_last_token_id() == self.tokenizer.eos_token_id):
+        #     seq.status = SequenceStatus.FINISHED_STOPPED
+        #     return
 
     def _run_workers_in_batch(
         self,
